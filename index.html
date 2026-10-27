@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HARIZMA ONLINE</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script><!-- kredensial Supabase (bukan di kode utama) -->
+<style>
+:root{--g:#2f6b3f;--b:#dfe5e0;--t:#1d2b22}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;font:15px system-ui,sans-serif;color:var(--t);background:#f6f8f6;padding-bottom:46px}
+header{background:var(--g);color:#fff;padding:12px 16px;font:700 20px system-ui;letter-spacing:1px;display:flex;justify-content:space-between;align-items:center}
+nav{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--b);display:flex;overflow-x:auto}
+nav a{padding:12px 13px;white-space:nowrap;cursor:pointer}nav a.on{color:var(--g);border-bottom:3px solid var(--g);font-weight:600}
+main{max-width:1000px;margin:auto;padding:14px}
+footer{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--b);text-align:center;padding:10px;font-size:13px}
+.card{background:#fff;border:1px solid var(--b);border-radius:10px;padding:14px;margin-bottom:14px}
+h2{margin:0 0 10px;font-size:18px}.mut{color:#6b7a70}
+button{background:var(--g);color:#fff;border:0;border-radius:6px;padding:8px 12px;cursor:pointer;font-size:14px;margin:2px}
+button.alt{background:#e6ebe7;color:var(--t)}button.bad{background:#b3261e}
+label{display:block;margin:8px 0;font-size:13px;color:#46554b}
+input,select,textarea{width:100%;padding:8px;border:1px solid #c5cec8;border-radius:6px;font:inherit;margin-top:3px}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 12px}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse}
+th,td{padding:8px;border-bottom:1px solid var(--b);text-align:left;font-size:14px;vertical-align:top}
+th{background:#eef3ef;white-space:nowrap}td.r,th.r{text-align:right}
+.warn{background:#fff4d6;border:1px solid #e8c766;border-radius:8px;padding:10px;margin:8px 0}
+.low{background:#fff8e6}.stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.stat div{background:#eef3ef;border-radius:8px;padding:10px}.stat b{display:block;font-size:18px;margin-top:4px}
+.modal{position:fixed;inset:0;background:#0007;display:flex;align-items:center;justify-content:center;z-index:20;padding:10px}
+.box{background:#fff;border-radius:10px;padding:16px;width:100%;max-width:460px;max-height:92vh;overflow:auto}
+.toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:var(--g);color:#fff;padding:10px 16px;border-radius:8px;z-index:30;max-width:90%}
+.toast.err{background:#b3261e}
+@media print{body>*:not(.modal){display:none!important}.modal{position:static;background:none}.noprint{display:none}}
+</style></head><body>
+<header><span>🌿 HARIZMA ONLINE</span><button id="out" class="alt" hidden onclick="sb.auth.signOut().then(()=>location.reload())">Keluar</button></header>
+<nav id="nav"></nav><main id="main"></main><footer id="jam"></footer>
+<script>
+/* ===== Dasar & utilitas ===== */
+const C=window.HARIZMA_CONFIG||{};
+const sb=window.supabase.createClient(C.url||'http://kosong.local',C.key||'kosong');
+const $=s=>document.querySelector(s),rp=n=>'Rp '+Number(n||0).toLocaleString('id-ID');
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hari=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
+const tg=d=>d?new Date(d+'T00:00').toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}):'-';
+const sum=(a,f)=>a.reduce((s,x)=>s+Number(f(x)||0),0);
+let D={},UID,cart=[],cur='kirim',kf={a:hari().slice(0,8)+'01',z:hari()},rf={q:'',j:'',a:'',z:''};
+const toast=(m,e)=>{const t=document.createElement('div');t.className='toast'+(e?' err':'');t.textContent=m;document.body.append(t);setTimeout(()=>t.remove(),3500)};
+const ok=async p=>{const{data,error}=await p;if(error)throw error;return data}; // lempar error Supabase
+const kdl=p=>p.kadaluarsa?Math.ceil((new Date(p.kadaluarsa+'T00:00')-new Date())/864e5):null; // sisa hari kadaluarsa
+const pn=id=>D.pelanggan.find(x=>x.id==id)?.nama_toko||'(dihapus)';
+const bayar=id=>sum(D.bayar.filter(y=>y.pengiriman_id==id),y=>y.jumlah);
+setInterval(()=>$('#jam').textContent=new Date().toLocaleString('id-ID',{dateStyle:'full',timeStyle:'medium'}),1000);
+
+/* ===== Muat data dari Supabase ===== */
+async function load(){
+  try{
+    const T=['produk','pelanggan','pengiriman','pengiriman_item','pembelian','pembayaran','usaha'];
+    const R=await Promise.all(T.map(t=>ok(sb.from(t).select('*'))));
+    D={produk:R[0].sort((a,b)=>a.nama.localeCompare(b.nama)),pelanggan:R[1].sort((a,b)=>a.nama_toko.localeCompare(b.nama_toko)),
+       kirim:R[2],item:R[3],beli:R[4],bayar:R[5],usaha:R[6][0]||{}};
+  }catch(e){toast('Gagal memuat data: '+e.message,1)}
+}
+const refresh=async()=>{await load();go(cur)};
+
+/* ===== Formulir modal serba guna (dengan validasi) ===== */
+// F: [kolom,label,tipe,wajib,opsi]  tipe: text|number|date|tel|area|select|password
+function form(judul,F,v,save){
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<form class="box"><h3>${judul}</h3>${F.map(([k,l,t,r,o])=>`<label>${l}${r?' *':''}${
+    t=='select'?`<select name="${k}">${o.map(([a,b])=>`<option value="${a}" ${v[k]==a?'selected':''}>${esc(b)}</option>`).join('')}</select>`:
+    t=='area'?`<textarea name="${k}" rows="2">${esc(v[k])}</textarea>`:
+    `<input name="${k}" type="${t}" value="${esc(v[k])}" ${t=='number'?'min="0" step="any"':''}>`}</label>`).join('')}
+    <button>Simpan</button><button type="button" class="alt" onclick="this.closest('.modal').remove()">Batal</button></form>`;
+  m.querySelector('form').onsubmit=async e=>{
+    e.preventDefault();const f=new FormData(e.target),o={};
+    for(const[k,l,t,r]of F){let x=(f.get(k)||'').trim();
+      if(r&&!x)return toast(l+' wajib diisi',1);
+      if(t=='tel'&&x&&!/^[0-9+\-\s]{6,16}$/.test(x))return toast('Nomor telepon tidak valid',1);
+      if(t=='number'&&x!==''){x=+x;if(!(x>=0))return toast(l+' harus angka ≥ 0',1)}
+      o[k]=x===''?(t=='number'?0:null):x}
+    try{await save(o);m.remove()}catch(er){toast(er.message,1)}};
+  document.body.append(m);
+}
+// Tambah/ubah/hapus generik untuk tabel produk & pelanggan
+const edt=(tbl,F,j,id)=>form(j,F,id?D[tbl].find(x=>x.id==id):{},async o=>{
+  await ok(id?sb.from(tbl).update(o).eq('id',id):sb.from(tbl).insert(o));toast('Tersimpan');await refresh()});
+const del=async(tbl,id)=>{if(!confirm('Hapus data ini?'))return;
+  try{await ok(sb.from(tbl).delete().eq('id',id));await refresh()}catch(e){toast('Gagal hapus (mungkin sudah dipakai transaksi): '+e.message,1)}};
+const FP=[['kode','Kode Produk','text',1],['nama','Nama Produk','text',1],['harga_beli','Harga Beli','number',1],['harga_jual','Harga Jual','number',1],
+ ['stok','Stok Saat Ini','number',1],['stok_min','Stok Minimum','number'],['kadaluarsa','Tanggal Kadaluarsa','date'],['keterangan','Keterangan','area']];
+const FC=[['nama_toko','Nama Minimarket','text',1],['pemilik','Nama Pemilik','text',1],['alamat','Alamat','area',1],['telepon','Nomor Telepon','tel',1],['keterangan','Keterangan','area']];
+const aksi=(t,F,j,id)=>`<button class="alt" onclick="edt('${t}',${F},'${j}','${id}')">Ubah</button><button class="bad" onclick="del('${t}','${id}')">Hapus</button>`;
+
+/* ===== Halaman ===== */
+const P={};
+// 1. Pengiriman barang
+const cartH=()=>cart.length?`<div class="tw"><table><tr><th>Produk</th><th>Jml</th><th class="r">Harga</th><th class="r">Subtotal</th><th></th></tr>${cart.map((c,i)=>
+  `<tr><td>${esc(c.nama)}</td><td>${c.qty}</td><td class="r">${rp(c.harga_jual)}</td><td class="r">${rp(c.qty*c.harga_jual)}</td><td><button class="alt" onclick="cart.splice(${i},1);rc()">✕</button></td></tr>`).join('')}</table></div>
+  <h3>Total: ${rp(sum(cart,c=>c.qty*c.harga_jual))}</h3>`:'<p class="mut">Belum ada barang di nota.</p>';
+const rc=()=>$('#cart').innerHTML=cartH();
+function tambah(){
+  const p=D.produk.find(x=>x.id==$('#kb').value),q=+$('#kq').value;
+  if(!p||!Number.isInteger(q)||q<1)return toast('Pilih produk dan isi jumlah (bilangan bulat > 0)',1);
+  const c=cart.find(x=>x.id==p.id),n=(c?.qty||0)+q;
+  if(n>p.stok)return toast(`Stok ${p.nama} hanya ${p.stok}`,1);
+  c?c.qty=n:cart.push({id:p.id,nama:p.nama,qty:q,harga_jual:p.harga_jual});$('#kq').value='';rc();
+}
+async function simpanKirim(){
+  const st=$('#ks').value,jt=$('#kj').value||null;
+  if(!$('#kp').value)return toast('Pilih pelanggan dulu',1);
+  if(!cart.length)return toast('Nota masih kosong',1);
+  if(st=='piutang'&&!jt)return toast('Isi tanggal jatuh tempo untuk piutang',1);
+  try{const id=await ok(sb.rpc('kirim_barang',{p_pelanggan:$('#kp').value,p_tanggal:$('#kt').value,p_status:st,p_jatuh_tempo:st=='piutang'?jt:null,
+    p_items:cart.map(c=>({produk_id:c.id,qty:c.qty}))}));cart=[];await refresh();nota(id)}catch(e){toast(e.message,1)}
+}
+function nota(id){
+  const k=D.kirim.find(x=>x.id==id),u=D.usaha,m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="box"><h3>${esc(u.nama||'HARIZMA ONLINE')}</h3><small>${esc(u.alamat||'')} ${esc(u.kontak||'')}</small><hr>
+  <b>NOTA #${id.slice(0,6).toUpperCase()}</b><br>Tanggal: ${tg(k.tanggal)}<br>Pelanggan: ${esc(pn(k.pelanggan_id))}
+  <table><tr><th>Barang</th><th>Jml</th><th class="r">Harga</th><th class="r">Subtotal</th></tr>${D.item.filter(i=>i.pengiriman_id==id).map(i=>
+  `<tr><td>${esc(i.nama)}</td><td>${i.qty}</td><td class="r">${rp(i.harga_jual)}</td><td class="r">${rp(i.qty*i.harga_jual)}</td></tr>`).join('')}</table>
+  <h3>Total: ${rp(k.total)}</h3>Status: <b>${k.status=='lunas'?'LUNAS':'BELUM DIBAYAR (jatuh tempo '+tg(k.jatuh_tempo)+')'}</b>
+  <div class="noprint"><button onclick="window.print()">🖨️ Cetak / Simpan PDF</button><button class="alt" onclick="this.closest('.modal').remove()">Tutup</button></div></div>`;
+  document.body.append(m);
+}
+P.kirim=()=>`<div class="card"><h2>📦 Pengiriman Barang</h2><div class="g">
+  <label>Pelanggan<select id="kp"><option value="">— pilih —</option>${D.pelanggan.map(p=>`<option value="${p.id}">${esc(p.nama_toko)}</option>`).join('')}</select></label>
+  <label>Tanggal<input type="date" id="kt" value="${hari()}"></label>
+  <label>Status<select id="ks" onchange="$('#kjw').hidden=this.value!='piutang'"><option value="lunas">LUNAS</option><option value="piutang">BELUM DIBAYAR (Piutang)</option></select></label>
+  <label id="kjw" hidden>Jatuh tempo<input type="date" id="kj"></label></div>
+  <div class="g"><label>Produk<select id="kb">${D.produk.filter(p=>p.stok>0).map(p=>`<option value="${p.id}">${esc(p.nama)} (stok ${p.stok})</option>`).join('')}</select></label>
+  <label>Jumlah<input type="number" id="kq" min="1" step="1"></label></div>
+  <button class="alt" onclick="tambah()">+ Tambah ke Nota</button><div id="cart">${cartH()}</div>
+  <button onclick="simpanKirim()">💾 Simpan Pengiriman</button></div>`;
+
+// 2. Data produk
+P.produk=()=>{const w=p=>p.stok<=p.stok_min||(kdl(p)!==null&&kdl(p)<=30),W=D.produk.filter(w);
+  return `<div class="card"><h2>📊 Data Produk <small class="mut">(${D.produk.length} terdaftar)</small></h2>
+  ${W.length?`<div class="warn">⚠️ ${W.map(p=>esc(p.nama)+(p.stok<=p.stok_min?' — stok menipis':'')+(kdl(p)!==null&&kdl(p)<=30?' — '+(kdl(p)<0?'sudah kadaluarsa':'kadaluarsa '+kdl(p)+' hari lagi'):'')).join('<br>⚠️ ')}</div>`:''}
+  <button onclick="edt('produk',FP,'Tambah Produk')">+ Tambah Produk</button><div class="tw"><table>
+  <tr><th>Kode</th><th>Nama</th><th class="r">Hrg Beli</th><th class="r">Hrg Jual</th><th class="r">Stok</th><th class="r">Min</th><th>Kadaluarsa</th><th>Ket.</th><th></th></tr>
+  ${D.produk.map(p=>`<tr class="${w(p)?'low':''}"><td>${esc(p.kode)}</td><td>${esc(p.nama)}</td><td class="r">${rp(p.harga_beli)}</td><td class="r">${rp(p.harga_jual)}</td><td class="r">${p.stok}</td><td class="r">${p.stok_min}</td><td>${tg(p.kadaluarsa)}</td><td>${esc(p.keterangan)}</td><td>${aksi('produk','FP','Ubah Produk',p.id)}</td></tr>`).join('')}</table></div></div>`};
+
+// 3. Belanja / pembelian stok
+const belanja=()=>{if(!D.produk.length)return toast('Tambah produk dulu',1);
+  form('Belanja Stok',[['produk','Produk','select',1,D.produk.map(p=>[p.id,p.nama])],['qty','Jumlah Dibeli','number',1],['harga','Harga Beli (per unit)','number',1],['tanggal','Tanggal Pembelian','date',1],['ket','Keterangan','area']],{tanggal:hari()},
+  async o=>{if(!Number.isInteger(o.qty)||o.qty<1)throw Error('Jumlah harus bilangan bulat > 0');
+    await ok(sb.rpc('beli_stok',{p_produk:o.produk,p_tanggal:o.tanggal,p_qty:o.qty,p_harga:o.harga,p_ket:o.ket}));toast('Stok bertambah');await refresh()})};
+P.belanja=()=>`<div class="card"><h2>🛒 Belanja / Pembelian Stok</h2><button onclick="belanja()">+ Catat Pembelian</button><div class="tw"><table>
+  <tr><th>Tanggal</th><th>Produk</th><th class="r">Jml</th><th class="r">Harga</th><th class="r">Total</th><th>Ket.</th></tr>
+  ${[...D.beli].sort((a,b)=>b.tanggal.localeCompare(a.tanggal)).map(b=>`<tr><td>${tg(b.tanggal)}</td><td>${esc(b.nama)}</td><td class="r">${b.qty}</td><td class="r">${rp(b.harga_beli)}</td><td class="r">${rp(b.total)}</td><td>${esc(b.keterangan)}</td></tr>`).join('')}</table></div></div>`;
+
+// 4. Data pelanggan
+P.pelanggan=()=>`<div class="card"><h2>👥 Data Pelanggan <small class="mut">(${D.pelanggan.length})</small></h2><button onclick="edt('pelanggan',FC,'Tambah Pelanggan')">+ Tambah Pelanggan</button><div class="tw"><table>
+  <tr><th>Minimarket</th><th>Pemilik</th><th>Alamat</th><th>Telepon</th><th>Ket.</th><th></th></tr>
+  ${D.pelanggan.map(p=>`<tr><td>${esc(p.nama_toko)}</td><td>${esc(p.pemilik)}</td><td>${esc(p.alamat)}</td><td>${esc(p.telepon)}</td><td>${esc(p.keterangan)}</td><td>${aksi('pelanggan','FC','Ubah Pelanggan',p.id)}</td></tr>`).join('')}</table></div></div>`;
+
+// 5. Pembayaran & piutang
+const bayarF=id=>{const k=D.kirim.find(x=>x.id==id),sisa=k.total-bayar(id);
+  form('Catat Pembayaran — sisa '+rp(sisa),[['jumlah','Jumlah Diterima','number',1],['tanggal','Tanggal Bayar','date',1]],{jumlah:sisa,tanggal:hari()},
+  async o=>{if(o.jumlah<=0||o.jumlah>sisa)throw Error('Jumlah harus > 0 dan tidak melebihi sisa piutang');
+    await ok(sb.rpc('catat_pembayaran',{p_kirim:id,p_tanggal:o.tanggal,p_jumlah:o.jumlah}));toast('Pembayaran dicatat');await refresh()})};
+P.piutang=()=>{const L=D.kirim.filter(k=>k.status!='lunas').map(k=>({...k,sisa:k.total-bayar(k.id)})).sort((a,b)=>(a.jatuh_tempo||'').localeCompare(b.jatuh_tempo||''));
+  return `<div class="card"><h2>💵 Pembayaran & Piutang</h2><div class="stat"><div>Total Piutang<b>${rp(sum(L,x=>x.sisa))}</b></div>
+  <div>Piutang Jatuh Tempo<b>${rp(sum(L.filter(x=>x.jatuh_tempo&&x.jatuh_tempo<hari()),x=>x.sisa))}</b></div><div>Sudah Dibayar<b>${rp(sum(D.bayar,y=>y.jumlah))}</b></div></div>
+  <div class="tw"><table><tr><th>Tanggal</th><th>Pelanggan</th><th class="r">Total</th><th class="r">Sisa</th><th>Jatuh Tempo</th><th></th></tr>
+  ${L.map(k=>`<tr class="${k.jatuh_tempo<hari()?'low':''}"><td>${tg(k.tanggal)}</td><td>${esc(pn(k.pelanggan_id))}</td><td class="r">${rp(k.total)}</td><td class="r">${rp(k.sisa)}</td><td>${tg(k.jatuh_tempo)}</td>
+  <td><button onclick="bayarF('${k.id}')">Bayar</button><button class="alt" onclick="nota('${k.id}')">Nota</button></td></tr>`).join('')||'<tr><td colspan="6">Tidak ada piutang 🎉</td></tr>'}</table></div></div>`};
+
+// 6. Riwayat transaksi (pengiriman, pembelian, pembayaran)
+const rl=()=>{const q=rf.q.toLowerCase(),R=[
+  ...D.kirim.map(k=>({id:k.id,t:k.tanggal,c:k.created_at,j:'Pengiriman',n:pn(k.pelanggan_id),p:D.item.filter(i=>i.pengiriman_id==k.id).map(i=>i.nama+' ×'+i.qty).join(', '),v:k.total})),
+  ...D.beli.map(b=>({t:b.tanggal,c:b.created_at,j:'Pembelian',n:'-',p:(b.nama||'')+' ×'+b.qty,v:-b.total})),
+  ...D.bayar.map(y=>({t:y.tanggal,c:y.created_at,j:'Pembayaran',n:pn(D.kirim.find(k=>k.id==y.pengiriman_id)?.pelanggan_id),p:'Pembayaran dari pelanggan',v:y.jumlah}))]
+  .filter(r=>(!rf.j||r.j==rf.j)&&(!rf.a||r.t>=rf.a)&&(!rf.z||r.t<=rf.z)&&(!q||(r.n+' '+r.p+' '+r.t).toLowerCase().includes(q)))
+  .sort((a,b)=>b.t.localeCompare(a.t)||b.c.localeCompare(a.c)),n=j=>R.filter(r=>r.j==j).length;
+  return `<p class="mut">${R.length} transaksi (Pengiriman ${n('Pengiriman')}, Pembelian ${n('Pembelian')}, Pembayaran ${n('Pembayaran')})</p><div class="tw"><table>
+  <tr><th>Tanggal</th><th>Jenis</th><th>Pelanggan</th><th>Rincian</th><th class="r">Nilai</th><th></th></tr>
+  ${R.map(r=>`<tr><td>${tg(r.t)}</td><td>${r.j}</td><td>${esc(r.n)}</td><td>${esc(r.p)}</td><td class="r">${rp(r.v)}</td><td>${r.id?`<button class="alt" onclick="nota('${r.id}')">Nota</button>`:''}</td></tr>`).join('')}</table></div>`};
+P.riwayat=()=>`<div class="card"><h2>📜 Riwayat Transaksi</h2><div class="g">
+  <label>Cari (pelanggan / produk)<input oninput="rf.q=this.value;$('#rl').innerHTML=rl()" value="${esc(rf.q)}"></label>
+  <label>Jenis<select onchange="rf.j=this.value;$('#rl').innerHTML=rl()">${['','Pengiriman','Pembelian','Pembayaran'].map(j=>`<option value="${j}" ${rf.j==j?'selected':''}>${j||'Semua'}</option>`).join('')}</select></label>
+  <label>Dari tanggal<input type="date" value="${rf.a}" onchange="rf.a=this.value;$('#rl').innerHTML=rl()"></label>
+  <label>Sampai tanggal<input type="date" value="${rf.z}" onchange="rf.z=this.value;$('#rl').innerHTML=rl()"></label></div><div id="rl">${rl()}</div></div>`;
+
+// 7. Keuangan
+const kv=()=>{const r=d=>d>=kf.a&&d<=kf.z,pm=sum(D.bayar.filter(y=>r(y.tanggal)),y=>y.jumlah),pg=sum(D.beli.filter(b=>r(b.tanggal)),b=>b.total),
+  K=D.kirim.filter(k=>r(k.tanggal)),pj=sum(K,k=>k.total),hpp=sum(K,k=>k.hpp),
+  pt=sum(D.kirim.filter(k=>k.status!='lunas'),k=>k.total-bayar(k.id)),M={},add=(d,k,v)=>{(M[d.slice(0,7)]=M[d.slice(0,7)]||{i:0,o:0,l:0})[k]+=Number(v)};
+  D.bayar.forEach(y=>add(y.tanggal,'i',y.jumlah));D.beli.forEach(b=>add(b.tanggal,'o',b.total));D.kirim.forEach(k=>add(k.tanggal,'l',k.total-k.hpp));
+  return `<div class="stat"><div>📈 Total Pemasukan<b>${rp(pm)}</b></div><div>💸 Total Pengeluaran<b>${rp(pg)}</b></div><div>💰 Saldo Akhir<b>${rp(pm-pg)}</b></div>
+  <div>📊 Piutang Belum Terima<b>${rp(pt)}</b></div><div>📉 Laba Kotor<b>${rp(pj-hpp)}</b><small class="mut">Penjualan ${rp(pj)} − HPP ${rp(hpp)}</small></div></div>
+  <h3>Ringkasan per bulan</h3><div class="tw"><table><tr><th>Bulan</th><th class="r">Pemasukan</th><th class="r">Pengeluaran</th><th class="r">Laba Kotor</th></tr>
+  ${Object.keys(M).sort().reverse().map(m=>`<tr><td>${m}</td><td class="r">${rp(M[m].i)}</td><td class="r">${rp(M[m].o)}</td><td class="r">${rp(M[m].l)}</td></tr>`).join('')}</table></div>`};
+P.uang=()=>`<div class="card"><h2>💰 Keuangan</h2><div class="g"><label>Dari tanggal<input type="date" value="${kf.a}" onchange="kf.a=this.value;$('#kv').innerHTML=kv()"></label>
+  <label>Sampai tanggal<input type="date" value="${kf.z}" onchange="kf.z=this.value;$('#kv').innerHTML=kv()"></label></div><div id="kv">${kv()}</div></div>`;
+
+// 8. Pengaturan
+const usahaF=()=>form('Profil Usaha',[['nama','Nama Usaha','text',1],['alamat','Alamat','area'],['kontak','Kontak','text']],D.usaha,
+  async o=>{await ok(sb.from('usaha').upsert({...o,user_id:UID}));toast('Profil disimpan');await refresh()});
+const sandi=()=>form('Ubah Kata Sandi',[['pw','Kata Sandi Baru (min. 6 karakter)','password',1],['pw2','Ulangi Kata Sandi','password',1]],{},
+  async o=>{if(o.pw.length<6||o.pw!==o.pw2)throw Error('Kata sandi minimal 6 karakter dan kedua isian harus sama');await ok(sb.auth.updateUser({password:o.pw}));toast('Kata sandi diubah')});
+const cadang=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(D,null,1)],{type:'application/json'}));a.download='harizma-cadangan-'+hari()+'.json';a.click()};
+P.atur=()=>`<div class="card"><h2>⚙️ Pengaturan</h2><p><b>Profil usaha:</b> ${esc(D.usaha.nama||'(belum diisi)')} — ${esc(D.usaha.alamat||'')} ${esc(D.usaha.kontak||'')}</p>
+  <button onclick="usahaF()">Ubah Profil Usaha</button><button class="alt" onclick="sandi()">Ubah Kata Sandi</button><button class="alt" onclick="cadang()">⬇️ Unduh Cadangan Data (JSON)</button>
+  <h3>Panduan singkat</h3><p>Data tersimpan di Supabase (server awan) dan hanya bisa dibuka setelah masuk. Langkah menghubungkan akun Supabase ada di berkas <b>PANDUAN.md</b>: buat proyek → jalankan <b>schema.sql</b> → buat pengguna → isi <b>config.js</b> dengan Project URL &amp; anon key.</p></div>`;
+
+/* ===== Navigasi, login & mulai ===== */
+const MENU=[['kirim','📦 Pengiriman'],['produk','📊 Produk'],['belanja','🛒 Belanja'],['pelanggan','👥 Pelanggan'],['piutang','💵 Piutang'],['riwayat','📜 Riwayat'],['uang','💰 Keuangan'],['atur','⚙️ Pengaturan']];
+function go(m){cur=m;document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('on',a.dataset.m==m));$('#main').innerHTML=P[m]()}
+function login(){
+  $('#main').innerHTML=`<form class="card" id="lf" style="max-width:380px;margin:30px auto"><h2>Masuk</h2><label>Email<input name="e" type="email" required></label>
+  <label>Kata Sandi<input name="p" type="password" required></label><button>Masuk</button></form>`;
+  $('#lf').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);
+    const{data,error}=await sb.auth.signInWithPassword({email:f.get('e').trim(),password:f.get('p')});
+    error?toast('Email atau kata sandi salah',1):start(data.session)};
+}
+async function start(s){UID=s.user.id;$('#out').hidden=false;
+  $('#nav').innerHTML=MENU.map(([k,l])=>`<a data-m="${k}" onclick="go('${k}')">${l}</a>`).join('');await load();go(cur)}
+(async()=>{
+  if(!C.url||!C.key)return $('#main').innerHTML='<div class="card warn">Aplikasi belum terhubung ke Supabase. Isi <b>config.js</b> — lihat PANDUAN.md.</div>';
+  const{data:{session}}=await sb.auth.getSession();session?start(session):login();
+})();
+</script></body></html>
